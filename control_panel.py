@@ -1,24 +1,89 @@
 import sys
 import time
-from PyQt5 import QtGui
-
+import nidaqmx
 import pythoncom
 import pyvisa
-import asg_cw_odmr_ui
+import cw_odmr_ui
 import pandas as pd
 import numpy as np
 import pyqtgraph as pg
+
 from threading import Thread
-from ctypes import *
-from ASG8005_PythonSDK import * 
+from nidaqmx.constants import *
+from nidaqmx.stream_readers import CounterReader
+from pulsestreamer import PulseStreamer, Sequence, OutputState, findPulseStreamers
+from PyQt5 import QtGui
 from PyQt5.QtGui import QIcon, QPixmap, QCursor, QColor
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtWidgets import QWidget, QApplication, QGraphicsDropShadowEffect, QFileDialog, QDesktopWidget, QVBoxLayout
 
-class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
+class ConfigureChannels():
+    def __init__(self):
+        super().__init__()
+        self._pulser_channels = {
+            'ch_aom': 0, # output channel 0: AOM control
+            'ch_switch': 1, # output channel 1: MW switch control
+            'ch_tagger': 2, # output channel 2 
+            'ch_sync': 3, # output channel 3
+            'ch_daq': 4, # NI gate channel
+            'ch_mw_source': 5 # N5181A frequency change channel
+        }
+        self._timetagger_channels = {
+            'click_channel': 1,
+            'start_channel':2,
+            'next_channel':-2,
+            'sync_channel':tt.CHANNEL_UNUSED,
+        }   
+        self._ni_6363_channels = {
+            'apd_channel':'/Dev2/PFI0',
+            'clock_channel':'/Dev2/PFI1',
+            'odmr_ctr_channel':'/Dev2/ctr0'
+        } 
+    @property
+    def pulser_channels(self):
+        return self._pulser_channels
+    @property
+    def timetagger_channels(self):
+        return self._timetagger_channels
+    @property
+    def ni_6363_channels(self):
+        return self._ni_6363_channels
+class Hardware():
+    def __init__(self):
+        super().__init__()
+
+    def pulser_generate(self):
+        devices = findPulseStreamers()
+        # DHCP is activated in factory settings
+        if devices !=[]:
+            ip = devices[0][0]
+        else:
+            # if discovery failed try to connect by the default hostname
+            # IP address of the pulse streamer (default hostname is 'pulsestreamer')
+            print("No Pulse Streamer found")
+
+        #connect to the pulse streamer
+        pulser = PulseStreamer(ip)
+
+        # Print serial number and FPGA-ID
+
+        return pulser
+    def daq_task_generate(self, apd_channel, odmr_ctr_channel, **kwargs):
+        task = nidaqmx.Task()
+        channel = task.ci_channels.add_ci_count_edges_chan(
+            counter=odmr_ctr_channel,
+            edge=Edge.RISING,
+            count_direction=CountDirection.COUNT_UP
+        )
+        channel.ci_count_edges_term = apd_channel
+        channel.ci_count_edges_active_edge = Edge.RISING
+        
+        return task, channel
+    
+class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
 
     rf_info_msg = pyqtSignal(str)
-    asg_info_msg = pyqtSignal(str)
+    pulse_streamer_info_msg = pyqtSignal(str)
     data_processing_info_msg = pyqtSignal(str)
 
 
@@ -59,14 +124,22 @@ class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
         self.my_rf_signal()
 
         '''
-        ASG init
+        ODMR init
         '''
-        self.asg_singal_init()
-        self.asg_info_ui()
-        self.asg_info_msg.connect(self.asg_slot)
-        self.m_CountCount = 1
+        self.pulser_singal_init()
+        self.pulser_info_ui()
+        self.pulse_streamer_info_msg.connect(self.pulser_slot)
+        self.pulser_daq_on_activate()
         self.cw_odmr_data = []
+        self.hardware = Hardware()
         
+        '''
+        Configure channels
+        '''
+        channel_config = ConfigureChannels()
+        pulser_channels = channel_config.pulser_channels
+        daq_channels = channel_config.ni_6363_channels
+        self._channels = {**pulser_channels, **daq_channels}
 
 
         '''
@@ -75,7 +148,7 @@ class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
         self.plot_ui_init()
         self.data_processing_signal()
         self.data_processing_info_ui()
-        
+
     def data_processing_signal(self):
         self.restore_view_btn.clicked.connect(self.restore_view)
         # Message signal
@@ -138,10 +211,6 @@ class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
         self.data_processing_msg.setText("<br>".join(self.data_processing_msg_history))
         self.data_processing_msg.resize(700, self.data_processing_msg.frameSize().height() + 20)
         self.data_processing_msg.repaint()  # 更新内容，如果不更新可能没有显示新内容
-        
-    def restore_view(self):
-        # self.data_processing_info_msg.emit('View restored')
-        self.cw_odmr_plot.getPlotItem().enableAutoRange()
 
     def plot_ui_init(self):
 
@@ -163,26 +232,36 @@ class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
         self.cw_odmr_plot.showAxes(True)
         self.cw_odmr_plot.showGrid(x=True, y=True)
 
-    def asg_singal_init(self):
-        self.asg_connect_btn.clicked.connect(self.asg_connect)  
-        self.asg_close_btn.clicked.connect(self.asg_close) 
+    def pulser_singal_init(self):
         # ASG scroll area scrollbar signal
-        self.asg_scroll.verticalScrollBar().rangeChanged.connect(
-            lambda: self.asg_scroll.verticalScrollBar().setValue(
-                self.asg_scroll.verticalScrollBar().maximum()
+        self.pulser_scroll.verticalScrollBar().rangeChanged.connect(
+            lambda: self.pulser_scroll.verticalScrollBar().setValue(
+                self.pulser_scroll.verticalScrollBar().maximum()
             )
         )
+    def pulser_daq_on_activate(self):
+        '''
+        Pusler Init
+        '''
+        self.pulser = self.hardware.pulser_generate()
+        '''
+        DAQ Init
+        '''
+        self.task, self.odmr_ctr_channel = self.hardware.daq_task_generate(**self._channels)
+        self.pulse_streamer_info_msg.emit('DAQ Counter channel: '+self.odmr_ctr_channel.channel_names[0])
+        self.pulse_streamer_info_msg.emit('DAQ APD channel: '+self.odmr_ctr_channel.ci_count_edges_term)
 
-        self.asg_set_btn.clicked.connect(self.set_pulse_and_count)
-        self.asg_start_btn.clicked.connect(self.asg_start)
-        self.asg_stop_btn.clicked.connect(self.asg_stop)
-    def asg_stop(self):
+    def pulser_daq_on_deactivate(self):
+        self.pulser.reset()
+        self.task.stop()
+        self.task.close()
+    def odmr_stop(self):
         rtn = self.asg.stop()
         if rtn == 1:
             self.asg_info_msg.emit('Stop success: {}'.format(rtn))
         self.__stopConstant = True
         self.cw_odmr_data = []
-    def asg_start(self):
+    def odmr_start(self):
         rtn = self.asg.start()
         if rtn == 1:
             self.asg_info_msg.emit('Start success: {}'.format(rtn))
@@ -191,59 +270,25 @@ class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
             target=self.count_data_thread_func
         )
         thread.start()
-    def set_pulse_and_count(self):
-        # dwell_time = int(self.dwell_time_spbx.value())
-        mw_time = int(self.mw_time_spbx.value())*1000000
-        acq_time = int(self.acq_time_spbx.value())*1000000
-        #ASG
-        ch1 = [0,mw_time*2, 1000, 1000]
-        ch2 = [mw_time, mw_time+2000]
-        ch3 = [mw_time*2+2000,0]
-        ch4 = [0,0]
-        ch5 = [0,0]
-        ch6 = [0,0]
-        ch7 = [0,0]
-        ch8 = [0,0]
-
-        asg_data = [ch1,
-                ch2,
-                ch3,
-                ch4,
-                ch5,
-                ch6,
-                ch7,
-                ch8
-                ]
-        self.asg_info_msg.emit('CH1: '+ str(ch1))
-        self.asg_info_msg.emit('CH2: '+ str(ch2))
-        self.asg_info_msg.emit('CH1 SUM: ' + str(sum(ch1)))
-        self.asg_info_msg.emit('CH2 SUM: ' + str(sum(ch2)))
-        self.asg_info_msg.emit('CH1 LEN: ' + str(len(ch1)))
-        self.asg_info_msg.emit('CH2 LEN: ' + str(len(ch2)))
-        asg_length = [len(seq) for seq in asg_data]
-        rtn = self.asg.download_ASG_pulse_data(asg_data, asg_length)
-        if rtn == 1:
-            self.asg_info_msg.emit('ASG pulse data download success: {}'.format(rtn))
-        #配置asg和count功能 有两个参数第一个是开启count功能，第二个是开启asg功能，第二个默认asg全开
-        rtn = self.asg.ASG_countConfig(1)
-        if rtn == 1:
-            self.asg_info_msg.emit('Count configured: {}'.format(rtn))
-
-        # Download count data
-        count_data = [20,mw_time-acq_time-20, acq_time, mw_time-acq_time, acq_time,2000]
-        self.asg_info_msg.emit('Count: ' + str(count_data))
-        self.asg_info_msg.emit('Count SUM: ' + str(sum(count_data)))
-        length_count=len(count_data)
-        self.m_CountCount = length_count/2
-        rtn = self.asg.ASG_counter_download(count_data,length_count)
-        if rtn == 1:
-            self.asg_info_msg.emit('Count data download success: {}'.format(rtn))
+    def start_stop_step(self):
+        start = int(self.start_freq_spbx.value())
+        stop = int(self.stop_freq_spbx.value())
+        step = int(self.step_freq_spbx.value())
+        num_points = int((stop - start)/step) + 1
+        return start, stop, step, num_points
+    def set_pulse_and_count(self, n_freq_points):
+        start, stop, step, num_points = self.start_stop_step()
+        mw_on = int(1E6)*int(self.mw_time_spbx.value()) # in ms
+        mw_off = mw_on #1ms
+        daq_high = 1000 # 1us
+        daq_wait = 1000 # 1us
+        #define digital levels
+        HIGH=1
+        LOW=0
+        seq_aom=[(mw_on+mw_off,HIGH)]*n_freq_points
+        seq_switch=[(mw_on,HIGH),(mw_off,LOW)]*n_freq_points
+        seq_daq=[(daq_wait,LOW),(daq_high,HIGH),(mw_on-2*daq_high-daq_wait,LOW),(daq_high,HIGH),(daq_wait,LOW),(daq_high,HIGH),(mw_off-2*daq_high-daq_wait,LOW),(daq_high,HIGH)]*n_freq_points
         
-        startFreq = int(self.start_freq_spbx.value())
-        stopFreq = int(self.stop_freq_spbx.value())
-        stepFreq = float(self.step_freq_spbx.value())
-        num_points = int((stopFreq - startFreq)/stepFreq) + 1
-        self.intensity_data = np.zeros(num_points)
     def count_data_thread_func(self):
         pythoncom.CoInitialize()
         startFreq = int(self.start_freq_spbx.value())
@@ -266,64 +311,24 @@ class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
                 break
             time.sleep(1)
         pythoncom.CoUninitialize()
-    
-    def asg_connect(self):
-        #实例化asg对象
-        self.asg = ASG8005()
 
-        #设置回调函数
-        status_callback_type = CFUNCTYPE(None, c_int, c_char_p)
-        self.status_callback_func = status_callback_type(self.status_callback)
 
-        self.asg.set_callback(self.status_callback_func)
-        count_callback_type = CFUNCTYPE(None, c_int, c_int, POINTER(c_uint32))
-        self.count_callback_func = count_callback_type(self.count_callback)
-        self.asg.set_callback_count(self.count_callback_func)
-        
-        rtn = self.asg.connect()
-        if rtn == 1:
-            self.asg_info_msg.emit('Connection success: {}'.format(rtn))
-    def asg_close(self):
-        rtn = self.asg.close_device()
-        if rtn == 1:
-            self.asg_info_msg.emit('Close success: {}'.format(rtn))
-    def asg_info_ui(self):
+    def pulser_info_ui(self):
 
-        self.asg_msg.setWordWrap(True)  # 自动换行
-        self.asg_msg.setAlignment(Qt.AlignTop)  # 靠上
-        self.asg_msg_history = []
+        self.pulser_msg.setWordWrap(True)  # 自动换行
+        self.pulser_msg.setAlignment(Qt.AlignTop)  # 靠上
+        self.pulser_msg_history = []
 
-    def asg_slot(self, msg):
+    def pulser_slot(self, msg):
 
         # print(msg)
-        self.asg_msg_history.append(msg)
-        self.asg_msg.setText("<br>".join(self.asg_msg_history))
-        self.asg_msg.resize(700, self.asg_msg.frameSize().height() + 20)
-        self.asg_msg.repaint()  # 更新内容，如果不更新可能没有显示新内容
+        self.pulser_msg_history.append(msg)
+        self.pulser_msg.setText("<br>".join(self.asg_msg_history))
+        self.pulser_msg.resize(700, self.asg_msg.frameSize().height() + 20)
+        self.pulser_msg.repaint()  # 更新内容，如果不更新可能没有显示新内容
 
 
-    def status_callback(self, type, c_char_buff): 
-        self.asg_info_msg.emit(str(type))
-        self.asg_info_msg.emit(str(c_char_buff))
-        return
 
-    def count_callback(self, type, len, c_int_buff): 
-        datList = [] 
-        for i in range(len): 
-            datList.append(c_int_buff[i]) 
-        typestr:str 
-        if type == 0: 
-            if self.m_CountCount != len: 
-                self.asg_info_msg.emit("数据错误") 
-            typestr = 'count 计数：' 
-        elif type == 3: 
-            typestr = '连续计数 : ' 
-        # self.asg_info_msg.emit(typestr + "datList :" + str(datList)) 
-        # print(typestr + "datList :" + str(datList))
-        # self.cw_odmr_data.append(datList[1]/datList[2])
-        self.cw_odmr_data.append(datList[1]/datList[2])
-        # print(datList)
-        return
     '''Set window ui'''
     def window_btn_signal(self):
         # window button sigmal
@@ -545,12 +550,11 @@ class MyWindow(asg_cw_odmr_ui.Ui_Form, QWidget):
             else:
                 self.rf_info_msg.emit('RF OFF failed')
                 sys.emit()
-    def closeEvent(self):
+    def closeEvent(self,event):
         self._gpib_connection.write(':OUTPut:STATe OFF')
         self._gpib_connection.close()  
         self.rm.close()
-        self.asg_stop()
-        self.asg_close()
+        self.pulser_daq_on_deactivate()
         return
 if __name__ == '__main__':
 
