@@ -110,7 +110,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         
         # init window button signal
         self.window_btn_signal()
-
+        
         '''
         RF init
         '''
@@ -123,16 +123,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         # Init RF signal
         self.my_rf_signal()
 
-        '''
-        ODMR init
-        '''
-        self.pulser_singal_init()
-        self.pulser_info_ui()
-        self.pulse_streamer_info_msg.connect(self.pulser_slot)
-        self.pulser_daq_on_activate()
-        self.cw_odmr_data = []
-        self.hardware = Hardware()
-        
+
         '''
         Configure channels
         '''
@@ -141,7 +132,15 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         daq_channels = channel_config.ni_6363_channels
         self._channels = {**pulser_channels, **daq_channels}
 
-
+        '''
+        ODMR init
+        '''
+        self.hardware = Hardware()
+        self.pulser_singal_init()
+        self.pulser_info_ui()
+        self.pulse_streamer_info_msg.connect(self.pulser_slot)
+        self.pulser_daq_on_activate()
+        
         '''
         Data processing init
         '''
@@ -239,6 +238,9 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
                 self.pulser_scroll.verticalScrollBar().maximum()
             )
         )
+        self.set_pulser_count_btn.clicked.connect(self.set_pulse_and_count)
+        self.odmr_start_btn.clicked.connect(self.odmr_start)
+        self.odmr_stop_btn.clicked.connect(self.odmr_stop)
     def pulser_daq_on_activate(self):
         '''
         Pusler Init
@@ -256,63 +258,80 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         self.task.stop()
         self.task.close()
     def odmr_stop(self):
-        rtn = self.asg.stop()
-        if rtn == 1:
-            self.asg_info_msg.emit('Stop success: {}'.format(rtn))
-        self.__stopConstant = True
-        self.cw_odmr_data = []
+        self._stopConstant = True
+     
     def odmr_start(self):
-        rtn = self.asg.start()
-        if rtn == 1:
-            self.asg_info_msg.emit('Start success: {}'.format(rtn))
+        self.pulser.reset()
+        self.task.start()
+        self._odmr_data_container = np.array([])
+        self._stopConstant = False
+        time.sleep(0.5)
+        final = OutputState([self._channels['ch_aom']],0,0)
+        self.pulser.stream(self.seq, -1, final)
         # Start daq in thread
         thread = Thread(
             target=self.count_data_thread_func
         )
         thread.start()
+    def count_data_thread_func(self):
+        n_sample = int(self.sample_spbx.value())
+        number_of_samples = n_sample*4
+        data_array = np.zeros(number_of_samples,dtype=np.uint32)
+        while True:
+            self.reader.read_many_sample_uint32(
+                data=data_array,
+                number_of_samples_per_channel=number_of_samples,
+                timeout=10
+            )
+            if self._odmr_data_container.size == 0:
+                self._odmr_data_container = data_array
+            else:
+                self._odmr_data_container = np.vstack(self._odmr_data_container, data_array).
+            if self._stopConstant == True:
+                break
+
     def start_stop_step(self):
         start = int(self.start_freq_spbx.value())
         stop = int(self.stop_freq_spbx.value())
         step = int(self.step_freq_spbx.value())
         num_points = int((stop - start)/step) + 1
         return start, stop, step, num_points
-    def set_pulse_and_count(self, n_freq_points):
+    def set_pulse_and_count(self, ch_aom, ch_switch, ch_daq, ch_mw_source):
+        print(ch_aom, ch_switch, ch_daq, ch_mw_source)
         start, stop, step, num_points = self.start_stop_step()
         mw_on = int(1E6)*int(self.mw_time_spbx.value()) # in ms
         mw_off = mw_on #1ms
         daq_high = 1000 # 1us
         daq_wait = 1000 # 1us
+        n_sample = int(self.sample_spbx.value())
         #define digital levels
         HIGH=1
         LOW=0
-        seq_aom=[(mw_on+mw_off,HIGH)]*n_freq_points
-        seq_switch=[(mw_on,HIGH),(mw_off,LOW)]*n_freq_points
-        seq_daq=[(daq_wait,LOW),(daq_high,HIGH),(mw_on-2*daq_high-daq_wait,LOW),(daq_high,HIGH),(daq_wait,LOW),(daq_high,HIGH),(mw_off-2*daq_high-daq_wait,LOW),(daq_high,HIGH)]*n_freq_points
+        seq_aom=[(mw_on+mw_off,HIGH)]*n_sample
+        seq_switch=[(mw_on,HIGH),(mw_off,LOW)]*n_sample
+        seq_daq=[(daq_wait,LOW),(daq_high,HIGH),(mw_on-2*daq_high-daq_wait,LOW),(daq_high,HIGH),(daq_wait,LOW),(daq_high,HIGH),(mw_off-2*daq_high-daq_wait,LOW),(daq_high,HIGH)]*n_sample
+        seq_mw_source = [((mw_on+mw_off)*n_sample-daq_wait,LOW),(daq_wait,HIGH)]
+        #create the sequence
+        self.seq = Sequence()
         
-    def count_data_thread_func(self):
-        pythoncom.CoInitialize()
-        startFreq = int(self.start_freq_spbx.value())
-        stopFreq = int(self.stop_freq_spbx.value())
-        stepFreq = float(self.step_freq_spbx.value())
+        #set digital channels
+        self.seq.setDigital(ch_aom, seq_aom)
+        self.seq.setDigital(ch_switch, seq_switch)
+        self.seq.setDigital(ch_daq, seq_daq)
+        self.seq.setDigital(ch_mw_source, seq_mw_source)
 
-        num_points = int((stopFreq - startFreq)/stepFreq) + 1 
-        repeat_num = int(self.repeat_spbx.value())
+        self.seq.plot()
+        self.task.timing.cfg_samp_clk_timing(
+            rate=2E6,
+            source='/Dev2/PFI1',
+            active_edge=Edge.RISING,
+            sample_mode=AcquisitionType.CONTINUOUS,
+            samps_per_chan=4*n_sample
+        )
+        self.pulse_streamer_info_msg.emit('Counter input channel: '+self.odmr_ctr_channel.ci_count_edges_term)
         
-        self.__stopConstant = False
-        while True:
-            
-            if self.__stopConstant == True:
-                break
-            i_count =  int(len(self.cw_odmr_data)//num_points)
-            self.repeat_count_num.setValue(i_count)
-            # print(1)
-            # print(self.cw_odmr_data)
-            if i_count >= repeat_num:
-                break
-            time.sleep(1)
-        pythoncom.CoUninitialize()
-
-
+        self.reader = CounterReader(self.task.in_stream)
+        
     def pulser_info_ui(self):
 
         self.pulser_msg.setWordWrap(True)  # 自动换行

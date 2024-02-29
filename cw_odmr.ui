@@ -371,7 +371,7 @@ QPushButton:pressed {
                  </widget>
                 </item>
                 <item>
-                 <layout class="QHBoxLayout" name="horizontalLayout_10" stretch="1,1,0,0">
+                 <layout class="QHBoxLayout" name="horizontalLayout_10" stretch="0,0,0,0">
                   <property name="spacing">
                    <number>5</number>
                   </property>
@@ -408,6 +408,19 @@ QPushButton:pressed {
                      </size>
                     </property>
                    </widget>
+                  </item>
+                  <item>
+                   <spacer name="horizontalSpacer">
+                    <property name="orientation">
+                     <enum>Qt::Horizontal</enum>
+                    </property>
+                    <property name="sizeHint" stdset="0">
+                     <size>
+                      <width>40</width>
+                      <height>20</height>
+                     </size>
+                    </property>
+                   </spacer>
                   </item>
                   <item>
                    <widget class="QGroupBox" name="groupBox_10">
@@ -455,41 +468,6 @@ QPushButton:pressed {
                        </property>
                        <property name="value">
                         <number>0</number>
-                       </property>
-                      </widget>
-                     </item>
-                    </layout>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QGroupBox" name="groupBox_12">
-                    <property name="title">
-                     <string>Clear</string>
-                    </property>
-                    <property name="checkable">
-                     <bool>true</bool>
-                    </property>
-                    <layout class="QHBoxLayout" name="horizontalLayout_5">
-                     <item>
-                      <widget class="QPushButton" name="clear_repeat_count_btn">
-                       <property name="styleSheet">
-                        <string notr="true">QPushButton{
-	font: 10pt &quot;Yu Gothic UI&quot;;	
-
-}</string>
-                       </property>
-                       <property name="text">
-                        <string>ClearRepeatCount</string>
-                       </property>
-                       <property name="icon">
-                        <iconset resource="resources.qrc">
-                         <normaloff>:/my_icons/images/icons/restore.svg</normaloff>:/my_icons/images/icons/restore.svg</iconset>
-                       </property>
-                       <property name="iconSize">
-                        <size>
-                         <width>20</width>
-                         <height>25</height>
-                        </size>
                        </property>
                       </widget>
                      </item>
@@ -955,7 +933,7 @@ QPushButton:pressed {
                      <item row="1" column="1">
                       <widget class="QLabel" name="label_10">
                        <property name="text">
-                        <string>Sample:</string>
+                        <string>SamplePerFreq:</string>
                        </property>
                       </widget>
                      </item>
@@ -987,7 +965,7 @@ QPushButton:pressed {
                       </widget>
                      </item>
                      <item row="4" column="2">
-                      <widget class="QPushButton" name="asg_set_btn">
+                      <widget class="QPushButton" name="set_pulser_count_btn">
                        <property name="styleSheet">
                         <string notr="true">QPushButton{
 	font: 10pt &quot;Yu Gothic UI&quot;;	
@@ -1019,7 +997,7 @@ QPushButton:pressed {
                     </property>
                     <layout class="QHBoxLayout" name="horizontalLayout_3">
                      <item>
-                      <widget class="QPushButton" name="asg_start_btn">
+                      <widget class="QPushButton" name="odmr_start_btn">
                        <property name="styleSheet">
                         <string notr="true">QPushButton{
 	font: 10pt &quot;Yu Gothic UI&quot;;	
@@ -1042,7 +1020,7 @@ QPushButton:pressed {
                       </widget>
                      </item>
                      <item>
-                      <widget class="QPushButton" name="asg_stop_btn">
+                      <widget class="QPushButton" name="odmr_stop_btn">
                        <property name="styleSheet">
                         <string notr="true">QPushButton{
 	font: 10pt &quot;Yu Gothic UI&quot;;	
