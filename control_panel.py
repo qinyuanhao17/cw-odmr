@@ -164,16 +164,14 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         self.save_plot_data_btn.clicked.connect(self.save_plot_data)
 
     def save_plot_data(self):
-        
+        startFreq, stopFreq, stepFreq, num_points = self.start_stop_step()
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(self, 'Choose Data File Path', r"d:", 'CSV Files (*.csv);;All Files (*)', options=options)
-        startFreq = int(self.start_freq_spbx.value())
-        stopFreq = int(self.stop_freq_spbx.value())
-        stepFreq = float(self.step_freq_spbx.value())
-        intensity_data = self.intensity_data
-        
-        frequency_data = np.arange(startFreq,stopFreq+stepFreq,stepFreq)
-        df = pd.DataFrame({'Frequency': frequency_data, 'Intensity': intensity_data})
+        repeat_count_num = int(self.repeat_count_num.value())
+        chunck_data = self.chunck_array(self._odmr_data_container,num_points)
+        frequency_span = np.arange(startFreq,stopFreq+stepFreq,stepFreq)
+        contrast_data = np.sum(chunck_data[:repeat_count_num, :], axis=0)
+        df = pd.DataFrame({'Frequency': frequency_span, 'Intensity': contrast_data})
         df.to_csv(file_path, index=False, header=True)
     def chunck_array(self, input_array, chunk_size):
         return np.array_split(input_array, np.ceil(len(input_array) / chunk_size))
