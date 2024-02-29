@@ -32,7 +32,7 @@ class ConfigureChannels():
             'click_channel': 1,
             'start_channel':2,
             'next_channel':-2,
-            'sync_channel':tt.CHANNEL_UNUSED,
+            # 'sync_channel':tt.CHANNEL_UNUSED,
         }   
         self._ni_6363_channels = {
             'apd_channel':'/Dev2/PFI0',
@@ -48,12 +48,14 @@ class ConfigureChannels():
     @property
     def ni_6363_channels(self):
         return self._ni_6363_channels
+
 class Hardware():
     def __init__(self):
         super().__init__()
 
     def pulser_generate(self):
         devices = findPulseStreamers()
+        # print(devices)
         # DHCP is activated in factory settings
         if devices !=[]:
             ip = devices[0][0]
@@ -94,7 +96,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         # init UI
         self.setupUi(self)
         self.ui_width = int(QDesktopWidget().availableGeometry().size().width()*0.75)
-        self.ui_height = int(QDesktopWidget().availableGeometry().size().height()*1)
+        self.ui_height = int(QDesktopWidget().availableGeometry().size().height()*0.8)
         self.resize(self.ui_width, self.ui_height)
         center_pointer = QDesktopWidget().availableGeometry().center()
         x = center_pointer.x()
@@ -149,7 +151,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         self.data_processing_info_ui()
 
     def data_processing_signal(self):
-        self.restore_view_btn.clicked.connect(self.restore_view)
+
         # Message signal
         self.data_processing_info_msg.connect(self.data_processing_slot)
         self.odmr_data_info_msg.connect(self.plot_result)
@@ -160,7 +162,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
             )
         )
         # plot signal
-        self.plot_data_btn.clicked.connect(self.plot_result)
+
         self.save_plot_data_btn.clicked.connect(self.save_plot_data)
 
     def save_plot_data(self):
@@ -259,7 +261,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
                 self.pulser_scroll.verticalScrollBar().maximum()
             )
         )
-        self.set_pulser_count_btn.clicked.connect(self.set_pulse_and_count)
+        self.set_pulser_count_btn.clicked.connect(lambda: self.set_pulse_and_count(**self._channels))
         self.odmr_start_btn.clicked.connect(self.odmr_start)
         self.odmr_stop_btn.clicked.connect(self.odmr_stop)
     def pulser_daq_on_activate(self):
@@ -285,7 +287,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
      
     def odmr_start(self):
         _,_,_,num_points = self.start_stop_step()
-        total_repeat = int(self.repeat_cbx.value())
+        total_repeat = int(self.repeat_spbx.value())
         self.repeat_count_num.setValue(0)
         self.pulser.reset()
         self.task.start()
@@ -337,7 +339,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         step = int(self.step_freq_spbx.value())
         num_points = int((stop - start)/step) + 1
         return start, stop, step, num_points
-    def set_pulse_and_count(self, ch_aom, ch_switch, ch_daq, ch_mw_source):
+    def set_pulse_and_count(self, ch_aom, ch_switch, ch_daq, ch_mw_source,**kwargs):
         print(ch_aom, ch_switch, ch_daq, ch_mw_source)
         start, stop, step, num_points = self.start_stop_step()
         mw_on = int(1E6)*int(self.mw_time_spbx.value()) # in ms
@@ -384,8 +386,8 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
 
         # print(msg)
         self.pulser_msg_history.append(msg)
-        self.pulser_msg.setText("<br>".join(self.asg_msg_history))
-        self.pulser_msg.resize(700, self.asg_msg.frameSize().height() + 20)
+        self.pulser_msg.setText("<br>".join(self.pulser_msg_history))
+        self.pulser_msg.resize(700, self.pulser_msg.frameSize().height() + 20)
         self.pulser_msg.repaint()  # 更新内容，如果不更新可能没有显示新内容
 
 
