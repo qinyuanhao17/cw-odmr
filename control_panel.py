@@ -7,7 +7,7 @@ import cw_odmr_ui
 import pandas as pd
 import numpy as np
 import pyqtgraph as pg
-
+import gc
 from threading import Thread
 from nidaqmx.constants import *
 from nidaqmx.stream_readers import CounterReader
@@ -85,7 +85,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
     rf_info_msg = pyqtSignal(str)
     pulse_streamer_info_msg = pyqtSignal(str)
     data_processing_info_msg = pyqtSignal(str)
-
+    odmr_data_info_msg = pyqtSignal(np.ndarray)
 
     def __init__(self):
 
@@ -152,6 +152,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         self.restore_view_btn.clicked.connect(self.restore_view)
         # Message signal
         self.data_processing_info_msg.connect(self.data_processing_slot)
+        self.odmr_data_info_msg.connect(self.plot_result)
         # Scroll area updating signal
         self.data_processing_scroll.verticalScrollBar().rangeChanged.connect(
             lambda: self.data_processing_scroll.verticalScrollBar().setValue(
@@ -160,12 +161,8 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         )
         # plot signal
         self.plot_data_btn.clicked.connect(self.plot_result)
-        self.repeat_count_num.valueChanged.connect(self.plot_result)
         self.save_plot_data_btn.clicked.connect(self.save_plot_data)
-        # clear all signal
-        self.clear_repeat_count_btn.clicked.connect(self.clear_repeat_count)
-    def clear_repeat_count(self):
-        self.repeat_count_num.setValue(0)
+
     def save_plot_data(self):
         
         options = QFileDialog.Options()
@@ -178,23 +175,23 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         frequency_data = np.arange(startFreq,stopFreq+stepFreq,stepFreq)
         df = pd.DataFrame({'Frequency': frequency_data, 'Intensity': intensity_data})
         df.to_csv(file_path, index=False, header=True)
-    def plot_result(self):
-        self.cw_odmr_plot.clear()
-        startFreq = int(self.start_freq_spbx.value())
-        stopFreq = int(self.stop_freq_spbx.value())
-        stepFreq = float(self.step_freq_spbx.value())
-        num_points = int((stopFreq - startFreq)/stepFreq) + 1
-        freq_data = list(np.arange(startFreq,stopFreq+stepFreq,stepFreq))
-        curve = self.cw_odmr_plot.plot(pen=pg.mkPen(color=(255,85,48), width=2))
-
-        i_count = int(self.repeat_count_num.value())
-        cw_odmr_data = np.array(self.cw_odmr_data[0:i_count*num_points])
-        cw_odmr_data = cw_odmr_data.reshape(-1,num_points)
-        self.intensity_data = np.sum(cw_odmr_data, axis=0)
-        # self.intensity_data = list(self.intensity_data)
+    def chunck_array(self, input_array, chunk_size):
+        return np.array_split(input_array, np.ceil(len(input_array) / chunk_size))
+    def plot_result(self, data):
+        startFreq, stopFreq, stepFreq, num_points = self.start_stop_step()
+        chosen_repeat = self.repeat_num_cbx.currentText() # combobox for plot
+        repeat_count_num = int(self.repeat_count_num.value())
+        chunck_data = self.chunck_array(data,num_points)
+        frequency_span = np.arange(startFreq,stopFreq+stepFreq,stepFreq)
+        if chosen_repeat == 'SUM':
+            contrast_data = np.sum(chunck_data[:repeat_count_num, :], axis=0)
+            freq_data = frequency_span
+        else:
+            contrast_data = chunck_data[chosen_repeat-1]
+            freq_data = frequency_span[:len(contrast_data)]
         
-        curve.setData(freq_data, list(self.intensity_data))   
-        # self.intensity_data = np.array(self.intensity_data)
+        self.odmr_curve.setData(freq_data, contrast_data)   
+
     def data_processing_info_ui(self):
 
         self.data_processing_msg.setWordWrap(True)  # 自动换行
@@ -210,27 +207,53 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         self.data_processing_msg.setText("<br>".join(self.data_processing_msg_history))
         self.data_processing_msg.resize(700, self.data_processing_msg.frameSize().height() + 20)
         self.data_processing_msg.repaint()  # 更新内容，如果不更新可能没有显示新内容
-
-    def plot_ui_init(self):
-
-        # Add pyqtGraph plot widget        
-        self.cw_odmr_plot = pg.PlotWidget(enableAutoRange=True)
+    def create_plot_widget(self, xlabel, ylabel, title, frame, infiniteLine=False):
+        plot = pg.PlotWidget(enableAutoRange=True, useOpenGL=True)
         graph_widget_layout = QVBoxLayout()
-        graph_widget_layout.addWidget(self.cw_odmr_plot)
-        self.graph_frame.setLayout(graph_widget_layout)
-        self.cw_odmr_plot.setLabel("left","Intensity (Counts)")
-        self.cw_odmr_plot.setLabel("bottom","RF Frequency (MHz)")
-        self.cw_odmr_plot.setTitle('CW-ODMR', color='k')
-        self.cw_odmr_plot.setBackground(background=None)
-        self.cw_odmr_plot.getAxis('left').setPen('k')
-        self.cw_odmr_plot.getAxis('left').setTextPen('k')
-        self.cw_odmr_plot.getAxis('bottom').setPen('k')
-        self.cw_odmr_plot.getAxis('bottom').setTextPen('k')
-        self.cw_odmr_plot.getAxis('top').setPen('k')
-        self.cw_odmr_plot.getAxis('right').setPen('k')
-        self.cw_odmr_plot.showAxes(True)
-        self.cw_odmr_plot.showGrid(x=True, y=True)
+        graph_widget_layout.addWidget(plot)
+        frame.setLayout(graph_widget_layout)
+        plot.setLabel("left", ylabel)
+        plot.setLabel("bottom", xlabel)
+        plot.setTitle(title, color='k')
+        plot.setBackground(background=None)
+        plot.getAxis('left').setPen('k')
+        plot.getAxis('left').setTextPen('k')
+        plot.getAxis('bottom').setPen('k')
+        plot.getAxis('bottom').setTextPen('k')
+        plot.getAxis('top').setPen('k')
+        plot.getAxis('right').setPen('k')
+        plot.showAxes(True)
+        plot.showGrid(x=False, y=True)
+        curve = plot.plot(pen=pg.mkPen(color=(255,85,48), width=2))        
+        if infiniteLine == True:
+            signal_start_pos = int(self.signal_start_spbx.value())
+            signal_span = int(self.signal_span_spbx.value())
+            ref_start_pos = int(self.ref_start_spbx.value())
+            ref_span = int(self.ref_span_spbx.value())
+            signal_stop_pos = signal_start_pos + signal_span
+            ref_stop_pos = ref_start_pos + ref_span
 
+            data_pen = pg.mkPen(color='b', width=1)
+            ref_pen = pg.mkPen(color='g', width=1)
+
+            self.data_start = self.generate_infinite_line(pen=data_pen,pos=signal_start_pos,label='start')
+            self.data_stop = self.generate_infinite_line(pen=data_pen,pos=signal_stop_pos,label='stop')
+            self.ref_start = self.generate_infinite_line(pen=ref_pen,pos=ref_start_pos,label='start')
+            self.ref_stop = self.generate_infinite_line(pen=ref_pen,pos=ref_stop_pos,label='stop')
+            plot.addItem(self.data_start)
+            plot.addItem(self.data_stop)
+            plot.addItem(self.ref_start)
+            plot.addItem(self.ref_stop)
+
+        return curve
+    def plot_ui_init(self):
+        self.odmr_curve = self.create_plot_widget(
+            xlabel='Frequency (MHz)',
+            ylabel='Contrast(a.u.)',
+            title='ODMR Data',
+            frame=self.graph_frame,
+            infiniteLine=False
+        )
     def pulser_singal_init(self):
         # ASG scroll area scrollbar signal
         self.pulser_scroll.verticalScrollBar().rangeChanged.connect(
@@ -259,34 +282,54 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         self.task.close()
     def odmr_stop(self):
         self._stopConstant = True
+        self.pulser.reset()
+        self.task.stop()
      
     def odmr_start(self):
+        _,_,_,num_points = self.start_stop_step()
+        total_repeat = int(self.repeat_cbx.value())
+        self.repeat_count_num.setValue(0)
         self.pulser.reset()
         self.task.start()
-        self._odmr_data_container = np.array([])
+        self._odmr_data_container = []
         self._stopConstant = False
         time.sleep(0.5)
         final = OutputState([self._channels['ch_aom']],0,0)
-        self.pulser.stream(self.seq, -1, final)
+        self.pulser.stream(self.seq, num_points*total_repeat, final)
         # Start daq in thread
         thread = Thread(
             target=self.count_data_thread_func
         )
         thread.start()
     def count_data_thread_func(self):
+        _,_,_,num_points = self.start_stop_step()
         n_sample = int(self.sample_spbx.value())
         number_of_samples = n_sample*4
         data_array = np.zeros(number_of_samples,dtype=np.uint32)
+        total_repeat = int(self.repeat_spbx.value())
         while True:
             self.reader.read_many_sample_uint32(
                 data=data_array,
                 number_of_samples_per_channel=number_of_samples,
                 timeout=10
             )
-            if self._odmr_data_container.size == 0:
-                self._odmr_data_container = data_array
-            else:
-                self._odmr_data_container = np.vstack(self._odmr_data_container, data_array).
+            gate_in = data_array[0::2]
+            gate_out = data_array[1::2]
+            counts = gate_out - gate_in
+            signal = sum(counts[0::2])
+            ref = sum(counts[1::2])
+            contrast = signal-ref
+            self._odmr_data_container = np.append(self._odmr_data_container, contrast)
+            if len(self._odmr_data_container) and len(self._odmr_data_container)% num_points:
+                repeat_count_num = int(self.repeat_count_num.value())
+                self.repeat_count_num.setValue(repeat_count_num+1)
+                self.repeat_num_cbx.addItem(str(repeat_count_num+2))
+            self.odmr_data_info_msg.emit(self._odmr_data_container)
+            del data_array, gate_in, gate_out, counts, signal, ref, contrast
+            gc.collect()
+            if len(self._odmr_data_container) % num_points == total_repeat:
+                self.odmr_stop()
+                break
             if self._stopConstant == True:
                 break
 
@@ -302,8 +345,9 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         mw_on = int(1E6)*int(self.mw_time_spbx.value()) # in ms
         mw_off = mw_on #1ms
         daq_high = 1000 # 1us
-        daq_wait = 1000 # 1us
+        daq_wait = daq_high # 1us
         n_sample = int(self.sample_spbx.value())
+        total_repeat = int(self.repeat_spbx.value())
         #define digital levels
         HIGH=1
         LOW=0
@@ -325,13 +369,13 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
             rate=2E6,
             source='/Dev2/PFI1',
             active_edge=Edge.RISING,
-            sample_mode=AcquisitionType.CONTINUOUS,
-            samps_per_chan=4*n_sample
+            sample_mode=AcquisitionType.FINITE,
+            samps_per_chan=4*n_sample*num_points*total_repeat
         )
         self.pulse_streamer_info_msg.emit('Counter input channel: '+self.odmr_ctr_channel.ci_count_edges_term)
         
         self.reader = CounterReader(self.task.in_stream)
-        
+        self.repeat_num_cbx.addItems(['SUM', str(1)])
     def pulser_info_ui(self):
 
         self.pulser_msg.setWordWrap(True)  # 自动换行

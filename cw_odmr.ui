@@ -371,10 +371,13 @@ QPushButton:pressed {
                  </widget>
                 </item>
                 <item>
-                 <layout class="QHBoxLayout" name="horizontalLayout_10" stretch="0,0,0,0">
+                 <layout class="QHBoxLayout" name="horizontalLayout_10" stretch="0,0,0,0,0">
                   <property name="spacing">
                    <number>5</number>
                   </property>
+                  <item>
+                   <widget class="QComboBox" name="repeat_num_cbx"/>
+                  </item>
                   <item>
                    <widget class="QPushButton" name="save_plot_data_btn">
                     <property name="text">
