@@ -175,21 +175,36 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         contrast_data = np.sum(chunck_data[:repeat_count_num, :], axis=0)
         df = pd.DataFrame({'Frequency': frequency_span, 'Intensity': contrast_data})
         df.to_csv(file_path, index=False, header=True)
-    def chunck_array(self, input_array, chunk_size):
-        return np.array_split(input_array, np.ceil(len(input_array) / chunk_size))
+    def chunck_array(self,input_array, chunk_size):
+        qu  = len(input_array) // chunk_size
+        mod = len(input_array) % chunk_size
+        if qu:
+            split_array = input_array[:qu*chunk_size]
+            mode_array = input_array[qu*chunk_size:]
+            splitted = list(np.array_split(split_array, qu))
+            splitted.append(mode_array)
+        else:
+            splitted = [input_array]
+        return splitted
     def plot_result(self, data):
         startFreq, stopFreq, stepFreq, num_points = self.start_stop_step()
         chosen_repeat = self.repeat_num_cbx.currentText() # combobox for plot
-        repeat_count_num = int(self.repeat_count_num.value())
+        repeat_count = int(self.repeat_count_num.value())
         chunck_data = self.chunck_array(data,num_points)
         frequency_span = np.arange(startFreq,stopFreq+stepFreq,stepFreq)
         if chosen_repeat == 'SUM':
-            contrast_data = np.sum(chunck_data[:repeat_count_num, :], axis=0)
-            freq_data = frequency_span
+            if repeat_count == 0:
+                contrast_data = chunck_data[0]
+                freq_data = frequency_span[:len(contrast_data)]
+            else:
+                contrast_data = np.mean(chunck_data[:-1], axis=0)
+                freq_data = frequency_span
         else:
-            contrast_data = chunck_data[chosen_repeat-1]
+            chosen_repeat = int(chosen_repeat)
+            contrast_data = chunck_data[chosen_repeat]
+            # print(contrast_data)
             freq_data = frequency_span[:len(contrast_data)]
-        
+        # print(data)
         self.odmr_curve.setData(freq_data, contrast_data)   
 
     def data_processing_info_ui(self):
@@ -282,8 +297,6 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         self.task.close()
     def odmr_stop(self):
         self._stopConstant = True
-        self.pulser.reset()
-        self.task.stop()
      
     def odmr_start(self):
         _,_,_,num_points = self.start_stop_step()
@@ -305,9 +318,11 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         _,_,_,num_points = self.start_stop_step()
         n_sample = int(self.sample_spbx.value())
         number_of_samples = n_sample*4
-        data_array = np.zeros(number_of_samples,dtype=np.uint32)
+        
         total_repeat = int(self.repeat_spbx.value())
         while True:
+
+            data_array = np.zeros(number_of_samples,dtype=np.uint32)
             self.reader.read_many_sample_uint32(
                 data=data_array,
                 number_of_samples_per_channel=number_of_samples,
@@ -318,19 +333,24 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
             counts = gate_out - gate_in
             signal = sum(counts[0::2])
             ref = sum(counts[1::2])
-            contrast = signal-ref
+            contrast = signal/ref
             self._odmr_data_container = np.append(self._odmr_data_container, contrast)
-            if len(self._odmr_data_container) and len(self._odmr_data_container)% num_points:
-                repeat_count_num = int(self.repeat_count_num.value())
-                self.repeat_count_num.setValue(repeat_count_num+1)
-                self.repeat_num_cbx.addItem(str(repeat_count_num+2))
+            # repeat_count_num = len(self._odmr_data_container)//num_points
+            # self.repeat_count_num.setValue(repeat_count_num)
+            # self.repeat_num_cbx.addItem(str(repeat_count_num+1))
+            if len(self._odmr_data_container) and (len(self._odmr_data_container)% num_points==0):
+                repeat_count = int(self.repeat_count_num.value())
+                self.repeat_count_num.setValue(repeat_count+1)
+                self.repeat_num_cbx.addItem(str(repeat_count+1))
             self.odmr_data_info_msg.emit(self._odmr_data_container)
             del data_array, gate_in, gate_out, counts, signal, ref, contrast
             gc.collect()
-            if len(self._odmr_data_container) % num_points == total_repeat:
+            if len(self._odmr_data_container) == (num_points*total_repeat):
                 self.odmr_stop()
                 break
             if self._stopConstant == True:
+                self.pulser.reset()
+                self.task.stop()
                 break
 
     def start_stop_step(self):
@@ -369,13 +389,14 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
             rate=2E6,
             source='/Dev2/PFI1',
             active_edge=Edge.RISING,
-            sample_mode=AcquisitionType.FINITE,
-            samps_per_chan=4*n_sample*num_points*total_repeat
+            sample_mode=AcquisitionType.CONTINUOUS,
+            samps_per_chan=4*n_sample
         )
         self.pulse_streamer_info_msg.emit('Counter input channel: '+self.odmr_ctr_channel.ci_count_edges_term)
         
         self.reader = CounterReader(self.task.in_stream)
-        self.repeat_num_cbx.addItems(['SUM', str(1)])
+        self.repeat_num_cbx.clear()
+        self.repeat_num_cbx.addItems(['SUM', str(0)])
     def pulser_info_ui(self):
 
         self.pulser_msg.setWordWrap(True)  # 自动换行
