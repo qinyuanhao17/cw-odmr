@@ -334,6 +334,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
             signal = sum(counts[0::2])
             ref = sum(counts[1::2])
             contrast = signal/ref
+            # contrast = signal
             self._odmr_data_container = np.append(self._odmr_data_container, contrast)
             # repeat_count_num = len(self._odmr_data_container)//num_points
             # self.repeat_count_num.setValue(repeat_count_num)
@@ -365,7 +366,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         mw_on = int(1E6)*int(self.mw_time_spbx.value()) # in ms
         mw_off = mw_on #1ms
         daq_high = 1000 # 1us
-        daq_wait = daq_high # 1us
+        daq_wait = daq_high*3500 # 150us
         n_sample = int(self.sample_spbx.value())
         total_repeat = int(self.repeat_spbx.value())
         #define digital levels
