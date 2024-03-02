@@ -162,7 +162,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
             )
         )
         # plot signal
-
+        self.plot_btn.clicked.connect(self.plot_result)
         self.save_plot_data_btn.clicked.connect(self.save_plot_data)
 
     def save_plot_data(self):
