@@ -366,7 +366,7 @@ class MyWindow(cw_odmr_ui.Ui_Form, QWidget):
         mw_on = int(1E6)*int(self.mw_time_spbx.value()) # in ms
         mw_off = mw_on #1ms
         daq_high = 1000 # 1us
-        daq_wait = daq_high*3500 # 150us
+        daq_wait = daq_high*2000 # 150us
         n_sample = int(self.sample_spbx.value())
         total_repeat = int(self.repeat_spbx.value())
         #define digital levels
